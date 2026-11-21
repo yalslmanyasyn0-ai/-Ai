@@ -3,7 +3,9 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 import joblib
 import pandas as pd
+import json
 from pathlib import Path
+from datetime import datetime
 
 app = FastAPI(title="قطرة AI")
 
@@ -12,6 +14,28 @@ BASE_DIR = Path(__file__).parent
 model = joblib.load(BASE_DIR / "qatra_model (1).pkl")
 encoder = joblib.load(BASE_DIR / "qatra_encoder.pkl")
 
+HISTORY_FILE = BASE_DIR / "qatra_history.json"
+
+
+def load_history():
+    if HISTORY_FILE.exists():
+        try:
+            return json.loads(
+                HISTORY_FILE.read_text(encoding="utf-8")
+            )
+        except (json.JSONDecodeError, OSError):
+            return []
+    return []
+
+
+def save_history(record):
+    history = load_history()
+    history.append(record)
+    HISTORY_FILE.write_text(
+        json.dumps(history, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -19,71 +43,68 @@ def home():
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>قطرة AI 💧</title>
-        <style>
-            body {
-                font-family: Arial;
-                background: #eaf8fc;
-                margin: 0;
-                padding: 20px;
-            }
-            .container {
-                max-width: 450px;
-                margin: 35px auto;
-                padding: 25px;
-                background: white;
-                border-radius: 20px;
-                text-align: center;
-                box-shadow: 0 4px 15px #0001;
-            }
-            h1 { color: #0787A5; }
-            input, select, button {
-                width: 100%;
-                box-sizing: border-box;
-                padding: 14px;
-                margin: 10px 0;
-                font-size: 17px;
-                border-radius: 10px;
-            }
-            input, select {
-                border: 1px solid #b5dce7;
-            }
-            button {
-                background: #0787A5;
-                color: white;
-                border: none;
-                font-weight: bold;
-            }
-        </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>قطرة AI</title>
+    <style>
+    body {
+        font-family: Arial;
+        background: #eaf8fc;
+        padding: 20px;
+    }
+    .container {
+        max-width: 450px;
+        margin: 35px auto;
+        padding: 25px;
+        background: white;
+        border-radius: 20px;
+        text-align: center;
+        box-shadow: 0 4px 15px #0001;
+    }
+    h1 {color: #0787A5;}
+    input, select, button {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 14px;
+        margin: 10px 0;
+        font-size: 17px;
+        border-radius: 10px;
+    }
+    input, select {border: 1px solid #b5dce7;}
+    button {
+        background: #0787A5;
+        color: white;
+        border: none;
+        font-weight: bold;
+    }
+    a {color: #0787A5;}
+    </style>
     </head>
     <body>
-        <div class="container">
-            <h1>💧 قطرة AI</h1>
-            <h3>نظام التنبؤ ومراقبة استهلاك المياه</h3>
+    <div class="container">
+        <h1>💧 قطرة AI</h1>
+        <h3>نظام التنبؤ ومراقبة استهلاك المياه</h3>
 
-            <form action="/تحليل" method="post">
-                <p>نوع المكان:</p>
-                <select name="نوع_المكان" required>
-                    <option value="منزل">منزل</option>
-                    <option value="مدرسة">مدرسة</option>
-                </select>
+        <form action="/تحليل" method="post">
+            <p>نوع المكان:</p>
+            <select name="نوع_المكان" required>
+                <option value="منزل">منزل</option>
+                <option value="مدرسة">مدرسة</option>
+            </select>
 
-                <p>عدد الأشخاص:</p>
-                <input type="number" name="عدد_الأشخاص"
-                       min="1" required>
+            <p>عدد الأشخاص:</p>
+            <input type="number" name="عدد_الأشخاص"
+                   min="1" required>
 
-                <p>الاستهلاك الفعلي باللتر يومياً:</p>
-                <input type="number" name="الاستهلاك_الفعلي"
-                       min="0" step="0.1" required
-                       placeholder="مثلاً 850">
+            <p>الاستهلاك الفعلي باللتر يومياً:</p>
+            <input type="number" name="الاستهلاك_الفعلي"
+                   min="0" step="0.1" required>
 
-                <button type="submit">
-                    افحص استهلاك المياه 💧
-                </button>
-            </form>
-        </div>
+            <button type="submit">حلل الاستهلاك 💧</button>
+        </form>
+
+        <a href="/السجل">📁 عرض سجل الاستهلاك</a>
+    </div>
     </body>
     </html>
     """
@@ -95,7 +116,6 @@ def predict(
     عدد_الأشخاص: int = Form(...),
     الاستهلاك_الفعلي: float = Form(...)
 ):
-
     if نوع_المكان not in ["منزل", "مدرسة"]:
         return "نوع المكان غير صحيح"
 
@@ -111,83 +131,178 @@ def predict(
 
     if hasattr(model, "feature_names_in_"):
         الأعمدة = list(model.feature_names_in_)
-
-        if set(الأعمدة) != set(البيانات.columns):
-            raise ValueError(
-                f"أسماء الأعمدة غير متطابقة: {الأعمدة}"
-            )
-
         البيانات = البيانات[الأعمدة]
 
     التوقع = float(model.predict(البيانات)[0])
+    التوقع = max(0, التوقع)
 
     الفرق = الاستهلاك_الفعلي - التوقع
 
     if الفرق > 0:
-        الحالة = "تنبيه! الاستهلاك الفعلي أعلى من المتوقع 🚨"
+        الحالة = "تنبيه! الاستهلاك أعلى من المتوقع 🚨"
         اللون = "#d9534f"
         التفاصيل = f"مقدار التجاوز: {الفرق:.1f} لتر"
+        النصيحة = "حاول تقليل مدة الاستحمام وإصلاح تسربات المياه وإغلاق الصنابير."
     elif الفرق < 0:
         الحالة = "ممتاز! الاستهلاك أقل من المتوقع 💚"
         اللون = "#16834a"
         التفاصيل = f"أقل من المتوقع بمقدار: {abs(الفرق):.1f} لتر"
+        النصيحة = "أحسنت! استمر في المحافظة على المياه."
     else:
         الحالة = "الاستهلاك مطابق للتوقع 💧"
         اللون = "#0787A5"
         التفاصيل = "لا يوجد فرق بين الاستهلاكين"
+        النصيحة = "حافظ على هذا المستوى من استهلاك المياه."
+
+    الحد_الأقصى = max(التوقع, الاستهلاك_الفعلي, 1)
+    عرض_المتوقع = التوقع / الحد_الأقصى * 100
+    عرض_الفعلي = الاستهلاك_الفعلي / الحد_الأقصى * 100
+
+    save_history({
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "place": نوع_المكان,
+        "people": عدد_الأشخاص,
+        "expected": round(التوقع, 1),
+        "actual": round(الاستهلاك_الفعلي, 1),
+        "difference": round(الفرق, 1)
+    })
 
     return f"""
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>نتائج قطرة AI</title>
-        <style>
-            body {{
-                font-family: Arial;
-                background: #eaf8fc;
-                padding: 20px;
-                text-align: center;
-            }}
-            .result {{
-                background: white;
-                max-width: 450px;
-                margin: 35px auto;
-                padding: 25px;
-                border-radius: 20px;
-                box-shadow: 0 4px 15px #0001;
-            }}
-            h1, h2 {{ color: #0787A5; }}
-            .status {{
-                color: {اللون};
-                font-weight: bold;
-                font-size: 19px;
-            }}
-            a {{ color: #0787A5; }}
-        </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>نتائج قطرة AI</title>
+    <style>
+    body {{
+        font-family: Arial;
+        background: #eaf8fc;
+        padding: 20px;
+        text-align: center;
+    }}
+    .result {{
+        background: white;
+        max-width: 450px;
+        margin: 25px auto;
+        padding: 25px;
+        border-radius: 20px;
+        box-shadow: 0 4px 15px #0001;
+    }}
+    h1, h2 {{color: #0787A5;}}
+    .status {{
+        color: {اللون};
+        font-weight: bold;
+        font-size: 18px;
+    }}
+    .bar {{
+        height: 18px;
+        border-radius: 10px;
+        margin: 10px 0 18px;
+        background: #0787A5;
+    }}
+    .actual {{background: #e6a23c;}}
+    .advice {{
+        background: #eaf8fc;
+        padding: 15px;
+        border-radius: 12px;
+        line-height: 1.8;
+    }}
+    a {{color: #0787A5; margin: 10px;}}
+    </style>
     </head>
     <body>
-        <div class="result">
-            <h1>💧 نتائج قطرة AI</h1>
-            <h3>المكان: {نوع_المكان}</h3>
-            <h3>عدد الأشخاص: {عدد_الأشخاص}</h3>
+    <div class="result">
+        <h1>💧 نتائج قطرة AI</h1>
+        <h3>المكان: {نوع_المكان}</h3>
+        <h3>عدد الأشخاص: {عدد_الأشخاص}</h3>
 
-            <p>الاستهلاك المتوقع:</p>
-            <h2>{التوقع:.1f} لتر يومياً</h2>
+        <p>الاستهلاك المتوقع:</p>
+        <h2>{التوقع:.1f} لتر يومياً</h2>
 
-            <p>الاستهلاك الفعلي:</p>
-            <h2>{الاستهلاك_الفعلي:.1f} لتر يومياً</h2>
+        <p>الاستهلاك الفعلي:</p>
+        <h2>{الاستهلاك_الفعلي:.1f} لتر يومياً</h2>
 
-            <hr>
+        <hr>
 
-            <p class="status">{الحالة}</p>
-            <h3>{التفاصيل}</h3>
+        <p class="status">{الحالة}</p>
+        <h3>{التفاصيل}</h3>
 
-            <br>
-            <a href="/">العودة للرئيسية</a>
-        </div>
+        <h3>📊 مقارنة الاستهلاك</h3>
+        <p>الاستهلاك المتوقع</p>
+        <div class="bar" style="width:{عرض_المتوقع:.1f}%"></div>
+
+        <p>الاستهلاك الفعلي</p>
+        <div class="bar actual" style="width:{عرض_الفعلي:.1f}%"></div>
+
+        <h3>💡 نصيحة قطرة AI</h3>
+        <div class="advice">{النصيحة}</div>
+
+        <br>
+        <a href="/">العودة للرئيسية</a>
+        <br><br>
+        <a href="/السجل">📁 سجل الاستهلاك</a>
+    </div>
     </body>
     </html>
     """
-        
+
+
+@app.get("/السجل", response_class=HTMLResponse)
+def history_page():
+    history = load_history()
+
+    rows = ""
+
+    for item in reversed(history):
+        rows += f"""
+        <tr>
+            <td>{item['date']}</td>
+            <td>{item['place']}</td>
+            <td>{item['people']}</td>
+            <td>{item['expected']}</td>
+            <td>{item['actual']}</td>
+            <td>{item['difference']}</td>
+        </tr>
+        """
+
+    if not rows:
+        rows = "<tr><td colspan='6'>لا توجد عمليات محفوظة بعد</td></tr>"
+
+    return f"""
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>سجل قطرة AI</title>
+    <style>
+    body {{font-family:Arial;background:#eaf8fc;padding:15px;}}
+    .box {{background:white;padding:20px;border-radius:15px;overflow-x:auto;}}
+    h1 {{color:#0787A5;text-align:center;}}
+    table {{border-collapse:collapse;width:100%;min-width:550px;}}
+    th,td {{border:1px solid #b5dce7;padding:10px;text-align:center;}}
+    th {{background:#0787A5;color:white;}}
+    a {{color:#0787A5;}}
+    </style>
+    </head>
+    <body>
+    <div class="box">
+        <h1>📁 سجل قطرة AI</h1>
+        <table>
+            <tr>
+                <th>التاريخ</th>
+                <th>المكان</th>
+                <th>الأشخاص</th>
+                <th>المتوقع</th>
+                <th>الفعلي</th>
+                <th>الفرق</th>
+            </tr>
+            {rows}
+        </table>
+        <br>
+        <a href="/">العودة للرئيسية 💧</a>
+    </div>
+    </body>
+    </html>
+    """
