@@ -6,11 +6,21 @@ import pandas as pd
 import json
 from pathlib import Path
 from datetime import datetime
-
+import os
+from supabase import create_client
 app = FastAPI(title="قطرة AI")
 
 BASE_DIR = Path(__file__).parent
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
+supabase_client = None
+
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase_client = create_client(
+        SUPABASE_URL,
+        SUPABASE_KEY
+    )
 model = joblib.load(BASE_DIR / "qatra_model (1).pkl")
 encoder = joblib.load(BASE_DIR / "qatra_encoder.pkl")
 
@@ -31,10 +41,26 @@ def load_history():
 def save_history(record):
     history = load_history()
     history.append(record)
+
     HISTORY_FILE.write_text(
         json.dumps(history, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
+
+    if supabase_client:
+        try:
+            supabase_client.table("water_records").insert({
+                "place_type": record["place"],
+                "people_count": record["people"],
+                "predicted_consumption": record["expected"],
+                "actual_consumption": record["actual"]
+            }).execute()
+
+            print("تم الحفظ في Supabase بنجاح!")
+
+        except Exception as e:
+            print("خطأ في Supabase:", str(e))
+            
 
 
 @app.get("/", response_class=HTMLResponse)
